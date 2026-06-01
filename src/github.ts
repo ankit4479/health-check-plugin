@@ -103,6 +103,18 @@ function restClient(repo: string, token: string): GhClient {
 function ghCliClient(repo: string): GhClient {
   const gh = (args: string[]): string =>
     execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  // The gh CLI rejects an issue if any --label doesn't already exist (unlike the
+  // REST API, which auto-creates them). Create missing labels first; ignore the
+  // "already exists" error so it's idempotent.
+  const ensureLabels = (labels: string[]): void => {
+    for (const l of labels) {
+      try {
+        gh(["label", "create", l, "--repo", repo, "--color", "ededed", "--description", "health-check"]);
+      } catch {
+        /* already exists — fine */
+      }
+    }
+  };
   return {
     async search(fingerprint) {
       const out = gh([
@@ -113,6 +125,7 @@ function ghCliClient(repo: string): GhClient {
       return arr[0] ?? null;
     },
     async create(title, body, labels) {
+      ensureLabels(labels);
       const args = ["issue", "create", "--repo", repo, "--title", title, "--body", body];
       for (const l of labels) args.push("--label", l);
       const url = gh(args).trim();
