@@ -1,0 +1,51 @@
+{
+  "name": "health-check-plugin",
+  "version": "0.1.0",
+  "description": "A universal, configurable health-check + healer-board system for any automation or software system. Collects health signals, scores 0-100, fingerprints and dedups issues, reports to a chat channel for discussion, and — on approval — opens GitHub issues and runs safety-gated auto-heals. Works as a standalone CLI and as a Claude Code / Codex / Gemini CLI plugin.",
+  "type": "module",
+  "bin": {
+    "health-check": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "health": "tsx src/cli.ts",
+    "run-cycle": "tsx src/cli.ts run",
+    "report": "tsx src/cli.ts report",
+    "issues": "tsx src/cli.ts issues",
+    "heal": "tsx src/cli.ts heal",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "health-check",
+    "monitoring",
+    "observability",
+    "healer-board",
+    "auto-healing",
+    "github-issues",
+    "alerting",
+    "discord",
+    "automation",
+    "pipeline-monitoring",
+    "self-healing",
+    "site-reliability"
+  ],
+  "author": "ankit4479",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "optionalDependencies": {
+    "undici": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "project": "my-system",
+  "scope": "production",
+  "periodHours": 24,
+
+  "severityWeights": { "critical": 25, "high": 10, "medium": 3, "low": 0.25 },
+  "scoreBands": { "healthy": 90, "warning": 70, "degraded": 50 },
+
+  "dataSources": {
+    "app_db": { "type": "postgres", "urlEnv": "DATABASE_URL", "ssl": true }
+  },
+
+  "collectors": [
+    {
+      "id": "stuck_jobs",
+      "type": "postgres",
+      "dataSource": "app_db",
+      "description": "Jobs stuck in 'processing' for over an hour",
+      "query": "SELECT id, created_at FROM jobs WHERE status = 'processing' AND created_at < now() - ($1 || ' hours')::interval",
+      "issueWhen": { "rowsAtLeast": 1 },
+      "severity": "high",
+      "title": "{{count}} jobs stuck in processing",
+      "message": "{{count}} job(s) have been in 'processing' longer than the lookback window. Oldest id: {{field:id}}.",
+      "fingerprintFields": ["id"],
+      "suggestedFix": "Re-run the job processor or reset stuck rows to 'pending'.",
+      "fix": {
+        "type": "sql",
+        "dataSource": "app_db",
+        "command": "UPDATE jobs SET status = 'pending' WHERE status = 'processing' AND created_at < now() - interval '1 hour'",
+        "estimatedRisk": "medium",
+        "safetyGates": ["Bounded row count", "Re-processing is idempotent"]
+      }
+    },
+    {
+      "id": "error_rate",
+      "type": "postgres",
+      "dataSource": "app_db",
+      "description": "Rows that ended in an error state in the window",
+      "query": "SELECT count(*)::int AS n FROM events WHERE status = 'error' AND created_at > now() - ($1 || ' hours')::interval",
+      "issueWhen": { "always": true },
+      "severity": "medium",
+      "title": "Errors detected in events",
+      "message": "{{field:n}} error events in the last window.",
+      "fingerprintFields": ["n"]
+    },
+    {
+      "id": "api_uptime",
+      "type": "http",
+      "url": "https://api.example.com/health",
+      "method": "GET",
+      "expectStatus": 200,
+      "timeoutMs": 5000,
+      "severity": "critical",
+      "title": "API /health is not returning 200",
+      "suggestedFix": "Check the API service and its upstream dependencies.",
+      "fix": {
+        "type": "retrigger",
+        "command": "echo 'restart command goes here'",
+        "estimatedRisk": "low",
+        "safetyGates": ["Restart is safe / stateless"]
+      }
+    },
+    {
+      "id": "disk_usage",
+      "type": "shell",
+      "command": "df -h / | tail -1 | awk '{print $5}' | tr -d '%'",
+      "issueWhen": { "numericAtLeast": 90 },
+      "severity": "high",
+      "title": "Root disk usage at {{value}}%",
+      "suggestedFix": "Free up disk or expand the volume."
+    }
+  ],
+
+  "channel": {
+    "type": "discord",
+    "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL"
+  },
+
+  "github": {
+    "enabled": true,
+    "repoEnv": "HEALTH_GITHUB_REPO",
+    "tokenEnv": "GITHUB_TOKEN",
+    "minSeverity": "high",
+    "labels": ["health-check", "automated"]
+  },
+
+  "healing": {
+    "enabled": false,
+    "requireApproval": true,
+    "maxPerRun": 5,
+    "allowedFixTypes": ["retrigger"],
+    "dryRun": true
+  },
+
+  "stateDir": ".health-check"
+}

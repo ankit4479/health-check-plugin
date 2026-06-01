@@ -1,0 +1,17 @@
+{
+  "description": "health-check-plugin hooks — config detection + memory injection at session start",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check-health-config.sh",
+            "timeout": 5,
+            "statusMessage": "Checking health-check configuration..."
+          }
+        ]
+      }
+    ]
+  }
+}

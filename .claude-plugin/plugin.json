@@ -1,0 +1,23 @@
+{
+  "name": "health-check-plugin",
+  "version": "0.1.0",
+  "description": "A universal, configurable health-check + healer board for any automation or system. Collects health signals (Postgres, HTTP, shell, custom), scores 0-100, fingerprints and dedups issues, reports to a chat channel for discussion, and — on approval — opens GitHub issues and runs safety-gated auto-heals. Ships a standalone CLI plus skills/agents/commands for Claude Code, Codex, and Gemini CLI.",
+  "author": {
+    "name": "ankit4479",
+    "url": "https://github.com/ankit4479"
+  },
+  "repository": "https://github.com/ankit4479/health-check-plugin",
+  "license": "MIT",
+  "keywords": [
+    "health-check",
+    "monitoring",
+    "observability",
+    "healer-board",
+    "auto-healing",
+    "github-issues",
+    "alerting",
+    "automation",
+    "self-healing",
+    "site-reliability"
+  ]
+}

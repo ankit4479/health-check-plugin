@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Local project config (may contain connection strings)
+health-check.config.json
+.health-check.config.json
+
+# Runtime state written by the engine
+.health-check/
+reports/
+*.report.json
+
+# OS / editor
+.DS_Store
+*.log
