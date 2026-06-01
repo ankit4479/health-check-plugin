@@ -1,0 +1,19 @@
+{
+  "name": "health-check",
+  "owner": {
+    "name": "ankit4479",
+    "url": "https://github.com/ankit4479"
+  },
+  "description": "Universal, configurable health-check + healer board for any system.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "health-check-plugin",
+      "source": "./",
+      "description": "Universal, configurable health-check + healer board for any system. Collects signals (Postgres/HTTP/shell/custom), scores 0-100, dedups issues, reports to Discord/Slack, files GitHub issues on approval, runs safety-gated auto-heals, and opens PRs. CLI + Claude Code / Codex / Gemini.",
+      "version": "0.1.0",
+      "category": "monitoring",
+      "keywords": ["health-check", "monitoring", "healer-board", "auto-healing", "github-issues", "observability"]
+    }
+  ]
+}
