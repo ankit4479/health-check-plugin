@@ -71,10 +71,10 @@
     }
   ],
 
-  "channel": {
-    "type": "discord",
-    "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL"
-  },
+  "channels": [
+    { "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" },
+    { "type": "slack", "webhookEnv": "HEALTH_SLACK_WEBHOOK_URL" }
+  ],
 
   "github": {
     "enabled": true,
@@ -89,7 +89,12 @@
     "requireApproval": true,
     "maxPerRun": 5,
     "allowedFixTypes": ["retrigger"],
-    "dryRun": true
+    "dryRun": true,
+    "pr": {
+      "baseBranch": "main",
+      "branchPrefix": "health-fix/",
+      "announce": true
+    }
   },
 
   "stateDir": ".health-check"

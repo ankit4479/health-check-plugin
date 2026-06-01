@@ -33,7 +33,7 @@ Defined in `src/config.ts` (`findConfigPath`, `loadConfig`, `validateConfig`).
 | `scoreBands` | `object` | No | see below | Score thresholds for the `healthy` / `warning` / `degraded` bands. |
 | `dataSources` | `object` | No | `{}` | Named data sources collectors connect to. Keyed by an id you choose. |
 | `collectors` | `array` | **Yes** | — | The health signals to gather. Must be a **non-empty** array. |
-| `channel` | `object` | No | `{ "type": "console" }` | Where the report is delivered. |
+| `channels` | `array` | No | `[{ "type": "console" }]` | Where reports and healing outcomes are delivered. One or more channels — every configured channel receives every broadcast. The legacy singular `channel` (object) is still accepted and auto-wrapped into a 1-element array. |
 | `github` | `object` | No | `{ enabled: false, repoEnv: "HEALTH_GITHUB_REPO" }` | GitHub issue integration. |
 | `healing` | `object` | No | `{ enabled: false, requireApproval: true }` | Auto-heal behavior and safety envelope. |
 | `stateDir` | `string` | No | `.health-check` | Directory for reports, fingerprint history, and the solutions log. |
@@ -208,31 +208,61 @@ is always gated by `healing` config + approval (see [Healing](#healing)).
 
 ---
 
-## `channel`
+## `channels`
 
-Where the report is delivered. The console is **always** printed regardless of this
-setting, so a run is never silent.
+An array of one or more delivery channels. **Reports and healing outcomes (including
+PR links) are broadcast to every configured channel.** Each channel is independent: if
+one channel fails to deliver, the others still receive the broadcast. The console is
+**always** printed regardless of this setting, so a run is never silent.
+
+> **Back-compat**: the legacy singular `channel` (a single object) is still accepted.
+> When present it is automatically wrapped into a 1-element `channels` array, so older
+> configs keep working unchanged. Prefer `channels` for new configs.
 
 ### console
 
 ```json
-"channel": { "type": "console" }
+"channels": [{ "type": "console" }]
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | `"console"` | **Yes** | Terminal-only delivery. The default if `channel` is omitted. |
+| `type` | `"console"` | **Yes** | Terminal-only delivery. The console is always printed even if not listed. |
 
 ### discord
 
 ```json
-"channel": { "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" }
+"channels": [{ "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" }]
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | `"discord"` | **Yes** | Posts rich embeds to a Discord webhook. |
-| `webhookEnv` | `string` | **Yes** | Env var holding the webhook URL. The report becomes the discussion "board" in that channel. |
+| `type` | `"discord"` | **Yes** | Posts rich embeds to a Discord incoming webhook. |
+| `webhookEnv` | `string` | **Yes** | Env var holding the incoming-webhook URL. The report becomes the discussion "board" in that channel. |
+
+### slack
+
+```json
+"channels": [{ "type": "slack", "webhookEnv": "HEALTH_SLACK_WEBHOOK_URL" }]
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"slack"` | **Yes** | Posts the report and healing outcomes to a Slack incoming webhook. |
+| `webhookEnv` | `string` | **Yes** | Env var holding the incoming-webhook URL. |
+
+### Multiple channels at once
+
+Configure Discord **and** Slack (and console) together — each receives every report and
+every healing outcome. A single channel failing never blocks the others.
+
+```json
+"channels": [
+  { "type": "console" },
+  { "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" },
+  { "type": "slack", "webhookEnv": "HEALTH_SLACK_WEBHOOK_URL" }
+]
+```
 
 ---
 
@@ -276,6 +306,7 @@ disabled and approval-required.
 | `maxPerRun` | `number` | No | `5` | Cap on the number of fixes executed in a single `heal` invocation. |
 | `allowedFixTypes` | `FixType[]` | No | `[]` | Whitelist of fix types the healer may execute. A fix type not listed here is skipped. |
 | `dryRun` | `boolean` | No | `false` | If `true`, logs what *would* run without executing anything. |
+| `pr` | `object` | No | see below | PR settings for the `heal-issue` code-fix path. Controls how `shipCodeFix()` opens pull requests. |
 
 ```json
 "healing": {
@@ -283,13 +314,31 @@ disabled and approval-required.
   "requireApproval": true,
   "maxPerRun": 5,
   "allowedFixTypes": ["retrigger"],
-  "dryRun": true
+  "dryRun": true,
+  "pr": {
+    "baseBranch": "main",
+    "branchPrefix": "health-fix/",
+    "announce": true
+  }
 }
 ```
 
 A fix executes only when **all** hold: `healing.enabled` is true **and** the fix type
 is in `allowedFixTypes` **and** it's approved (unless `requireApproval` is false) **and**
 the run is under `maxPerRun`. `github_issue` and `manual` fix types are never executable.
+
+### `healing.pr`
+
+Settings for the GitHub-issue-driven code-fix path (`heal-issue`, see the
+[Operator Guide](./operator-guide.md#the-healer-loop-github-issue-driven)). When a
+collector's `fix.type` is `code`, the healing-agent writes the fix and `shipCodeFix()`
+opens a pull request whose body contains `Fixes #N`. Requires the `gh` CLI.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `baseBranch` | `string` | No | `main` | Branch the PR targets. |
+| `branchPrefix` | `string` | No | `health-fix/` | Prefix for the auto-created fix branch. |
+| `announce` | `boolean` | No | `true` | When `true`, the opened PR link is broadcast to every configured channel (`🔀 PR opened #N <url>`). |
 
 ---
 
@@ -358,8 +407,13 @@ the run is under `maxPerRun`. `github_issue` and `manual` fix types are never ex
     }
   ],
 
-  // Delivery target; console is always printed regardless.
-  "channel": { "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" },
+  // Delivery channels; every channel receives every report and healing
+  // outcome, one failing never blocks the others, console is always printed.
+  "channels": [
+    { "type": "console" },
+    { "type": "discord", "webhookEnv": "HEALTH_DISCORD_WEBHOOK_URL" },
+    { "type": "slack", "webhookEnv": "HEALTH_SLACK_WEBHOOK_URL" }
+  ],
 
   // GitHub issue integration with fingerprint dedup.
   "github": {
@@ -376,7 +430,13 @@ the run is under `maxPerRun`. `github_issue` and `manual` fix types are never ex
     "requireApproval": true,
     "maxPerRun": 5,
     "allowedFixTypes": ["retrigger"],
-    "dryRun": true
+    "dryRun": true,
+    // PR settings for the heal-issue code-fix path (requires the gh CLI).
+    "pr": {
+      "baseBranch": "main",
+      "branchPrefix": "health-fix/",
+      "announce": true
+    }
   },
 
   // Where run state is persisted.

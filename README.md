@@ -22,21 +22,36 @@ watches a data pipeline, a SaaS API, an ML system, a CI/CD setup, or plain infra
 ## The idea — a healer board
 
 ```mermaid
-flowchart LR
+flowchart TB
     C["📡 Collect<br/>postgres · http · shell · custom"] --> S["📊 Score 0-100<br/>+ fingerprint & dedup"]
-    S --> R["📋 Report<br/>delivered to the board<br/>(Discord / console)"]
-    R --> D{"🗣 Discuss<br/>+ approve"}
-    D -->|file| G["🐙 GitHub issues<br/>(dedup, reopen, auto-close)"]
-    D -->|heal| H["🔧 Safety-gated fixes<br/>(sql · shell · http · retrigger)"]
-    G --> V["✅ Verify next run<br/>resolved vs. recurring"]
-    H --> V
+    S --> R["📋 Report → all channels<br/>(Discord + Slack + console)"]
+    R --> D1{"🗣 Approval #1<br/>discuss + file?"}
+    D1 -->|approve| G["🐙 GitHub issue<br/>(dedup, reopen, auto-close)"]
+    G --> D2{"🩺 Approval #2<br/>fix this issue?"}
+    D2 -->|"ops fix"| H["🔧 Engine runs fix →<br/>verify → close issue"]
+    D2 -->|"code fix"| A["🤖 Agent writes the fix →<br/>open PR (Fixes #N)"]
+    H --> N["📣 Notify all channels:<br/>✅ Resolved #N + what was fixed"]
+    A --> NP["📣 Notify all channels:<br/>🔧 Fixed #N + summary + 🔀 PR link"]
+    N --> V["✅ Verify next run<br/>resolved vs. recurring"]
+    NP --> V
     V --> M["🧠 Compound to memory"]
     M --> C
 ```
 
-The "board" is the human-in-the-loop step: a scored report lands in your channel, the
-team talks it through, and only then does the system act. Auto-healing is optional and
-locked behind explicit approval and per-fix safety gates.
+The "board" is human-in-the-loop, and there are **two approval gates**:
+
+1. **Approval #1 — file it.** A scored report lands in *every* channel (Discord, Slack,
+   console). The team discusses, and only on approval is a GitHub issue created.
+2. **Approval #2 — fix it.** Once an issue exists, the healer asks again: *fix this?*
+   Nothing is touched until you approve. Then:
+   - an **ops fix** (sql/shell/http/retrigger) runs deterministically, verifies, and
+     **closes** the issue; or
+   - a **code fix** is written by the agent, shipped as a **PR** (`Fixes #N`) — there is
+     no PR without an actual fix.
+
+Either way, the system posts back to **all channels** — for code fixes, that's a
+**summary of what was fixed plus the PR link**. Healing is always gated by `enabled`,
+`allowedFixTypes`, approval, `maxPerRun`, and per-fix safety gates.
 
 ---
 
@@ -89,9 +104,10 @@ the engine is agent-agnostic.
 | **Shape** | A declarative `issueWhen` predicate decides if it's an issue; the title template fills in `{{count}}`/`{{value}}`/`{{field:NAME}}`. | per collector |
 | **Score** | `score = 100 − Σ(weight × count)`; bands: healthy ≥90, warning ≥70, degraded ≥50, else critical. | `severityWeights`, `scoreBands` |
 | **Dedup** | A 16-char fingerprint identifies "the same issue" across runs and against GitHub. | `fingerprintFields` |
-| **Deliver** | The report goes to the console always, and Discord if configured. | `channel` |
-| **File** | On approval, issues become GitHub issues — open→comment, closed→reopen, none→create. | `github` |
-| **Heal** | On approval, declarative fixes run inside a safety envelope. | `healing` + collector `fix` |
+| **Deliver** | The report is broadcast to **every** configured channel (console always; Discord and/or Slack). | `channels[]` |
+| **File** | On approval #1, issues become GitHub issues — open→comment, closed→reopen, none→create. | `github` |
+| **Heal** | On approval #2, ops fixes run in a safety envelope; code fixes are written by the agent and shipped as a PR. | `healing` + collector `fix` |
+| **Notify** | Each resolution is posted back to all channels — code fixes include a what-was-fixed summary + PR link. | `channels[]`, `healing.pr` |
 | **Remember** | Fingerprint history tracks recurrence; the solutions log compounds fix outcomes. | `.health-check/` |
 
 ---
@@ -144,7 +160,11 @@ health-check run        Collect, score, persist, and deliver a report
 health-check report     Re-render the latest saved report
 health-check issues     File the latest report's issues to GitHub (dedup by fingerprint)
 health-check plan       Print an advisory healing plan
-health-check heal       Execute approved fixes  (--approve all | --approve 0,2,3)
+health-check heal       Execute approved fixes from the latest report  (--approve all | 0,2,3)
+health-check heal-issue The healer loop — remediate FROM open GitHub issues
+                        --list                 show open issues + how each is fixable
+                        --approve all|<#,#>     approve ops fixes (by issue number)
+                        --issue <#,#>           restrict to specific issue numbers
 health-check verify     Show recurring vs. resolved issues across runs
 health-check init       Scaffold health-check.config.json
 ```
@@ -162,9 +182,13 @@ values come from your environment (`.env`, CI secrets, etc.). See [`.env.example
 | What | Config key | Env (example) |
 |------|-----------|---------------|
 | Postgres data source | `dataSources.*.urlEnv` | `DATABASE_URL` |
-| Discord board | `channel.webhookEnv` | `HEALTH_DISCORD_WEBHOOK_URL` |
+| Discord channel | `channels[].webhookEnv` | `HEALTH_DISCORD_WEBHOOK_URL` |
+| Slack channel | `channels[].webhookEnv` | `HEALTH_SLACK_WEBHOOK_URL` |
 | GitHub repo | `github.repoEnv` | `HEALTH_GITHUB_REPO` (`owner/repo`) |
 | GitHub token | `github.tokenEnv` | `GITHUB_TOKEN` (or falls back to the `gh` CLI) |
+
+Channels are an array — list both Discord and Slack to broadcast to both at once.
+PRs require the `gh` CLI installed + authenticated.
 
 ---
 

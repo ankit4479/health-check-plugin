@@ -75,12 +75,20 @@ export async function deliverDiscord(
   channel: DiscordChannel
 ): Promise<void> {
   const webhook = requireEnv(channel.webhookEnv, "the discord channel");
-  const embeds = buildDiscordEmbeds(report, config);
+  await postToDiscord(webhook, { embeds: buildDiscordEmbeds(report, config) });
+}
 
+/** Post a healing/resolution message (incl. PR link) to Discord. */
+export async function deliverDiscordText(channel: DiscordChannel, content: string): Promise<void> {
+  const webhook = requireEnv(channel.webhookEnv, "the discord channel");
+  await postToDiscord(webhook, { content: content.slice(0, 2000) });
+}
+
+async function postToDiscord(webhook: string, payload: unknown): Promise<void> {
   const res = await fetch(webhook, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ embeds }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     throw new Error(`Discord webhook returned ${res.status}: ${await res.text()}`);

@@ -22,6 +22,7 @@ import { renderConsole } from "./delivery/console.js";
 import { syncIssuesToGitHub } from "./github.js";
 import { generateHealingPlan } from "./healing/plan.js";
 import { executeHealing } from "./healing/execute.js";
+import { matchOpenIssues, healOpenIssues } from "./healing/issue-heal.js";
 import type { CollectorContext } from "./collectors/index.js";
 
 const args = process.argv.slice(2);
@@ -47,6 +48,8 @@ async function main(): Promise<void> {
       return cmdPlan();
     case "heal":
       return cmdHeal();
+    case "heal-issue":
+      return cmdHealIssue();
     case "verify":
       return cmdVerify();
     case "init":
@@ -154,6 +157,55 @@ async function cmdHeal(): Promise<void> {
   }
 }
 
+async function cmdHealIssue(): Promise<void> {
+  const config = loadConfig(flag("config"));
+  if (!config.github.enabled) {
+    console.error("github.enabled is false — the issue-driven healer needs GitHub.");
+    process.exitCode = 1;
+    return;
+  }
+  const store = new StateStore(config.stateDir);
+
+  // --list: show open health issues and how each would be remediated.
+  if (has("list")) {
+    const matched = await matchOpenIssues(config);
+    if (matched.length === 0) {
+      console.log("No open health-check issues found.");
+      return;
+    }
+    for (const m of matched) {
+      const how =
+        m.path === "ops" ? `ops fix (${m.fix?.type})` : m.path === "code" ? "code fix → PR (agent)" : "manual";
+      console.log(`  #${m.issue.number}  [${how}]  ${m.issue.title}`);
+    }
+    console.log(`\nApprove ops fixes with:  health-check heal-issue --approve <numbers>|all`);
+    console.log(`Code fixes: the healing-agent edits files, then ships a PR (see docs).`);
+    return;
+  }
+
+  const approve = flag("approve");
+  const onlyArg = flag("issue");
+  const matched = await matchOpenIssues(config);
+  const approvedNumbers =
+    approve === "all"
+      ? matched.filter((m) => m.path === "ops").map((m) => m.issue.number)
+      : (approve ?? "").split(",").filter((s) => s !== "").map(Number);
+  const onlyNumbers = onlyArg ? onlyArg.split(",").map(Number) : undefined;
+
+  const results = await healOpenIssues(config, { approvedNumbers, onlyNumbers, store });
+  for (const r of results) {
+    const icon = r.outcome === "success" ? "✅" : r.outcome === "failure" ? "❌" : r.outcome === "needs_agent" ? "🤖" : "•";
+    console.log(`  ${icon} #${r.number} [${r.path}/${r.outcome}] ${r.title} — ${r.detail}`);
+  }
+  const needAgent = results.filter((r) => r.outcome === "needs_agent");
+  if (needAgent.length) {
+    console.log(
+      `\n${needAgent.length} issue(s) need a code fix. The healing-agent should edit the files, ` +
+        `then call shipCodeFix() (or use /health-heal-issue) to open a PR linked "Fixes #N".`
+    );
+  }
+}
+
 async function cmdVerify(): Promise<void> {
   const config = loadConfig(flag("config"));
   const store = new StateStore(config.stateDir);
@@ -202,8 +254,14 @@ Commands:
   report     Re-render the latest saved report
   issues     File the latest report's issues to GitHub (dedup by fingerprint)
   plan       Print a healing plan (advisory, JSON) from the latest report
-  heal       Execute approved fixes from a plan (safety-gated)
+  heal       Execute approved fixes from the latest report's plan (safety-gated)
              --approve all | --approve 0,2,3
+  heal-issue Drive remediation FROM open GitHub issues (the healer loop)
+             --list                 show open issues + how each would be fixed
+             --approve all|<#,#>     approve ops fixes (sql/shell/http/retrigger)
+             --issue <#,#>           restrict to specific issue numbers
+             Ops fixes run, verify, close the issue, and announce to all channels.
+             Code fixes are flagged for the agent to write + ship as a PR.
   verify     Show recurring vs. resolved issues across runs
   init       Scaffold a starter health-check.config.json
 

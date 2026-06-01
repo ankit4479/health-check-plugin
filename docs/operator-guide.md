@@ -22,6 +22,7 @@ npx tsx src/cli.ts <command> [flags]    # from a checkout (dev)
 | `issues` | File the latest report's issues to GitHub (deduped by fingerprint). |
 | `plan` | Print an advisory healing plan (JSON) from the latest report. Nothing executes. |
 | `heal` | Execute approved fixes from the plan, inside the safety envelope. |
+| `heal-issue` | Drive the GitHub-issue-driven healer loop: list open health-check issues and remediate them (ops fix, code fix → PR, or manual). See [The healer loop](#the-healer-loop-github-issue-driven). |
 | `verify` | Show recurring vs. resolved issues across runs. |
 | `init` | Scaffold a starter `health-check.config.json`. |
 
@@ -70,6 +71,8 @@ required env vars present. Example GitHub Actions step:
     DATABASE_URL: ${{ secrets.DATABASE_URL }}
     HEALTH_GITHUB_REPO: ${{ github.repository }}
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    HEALTH_DISCORD_WEBHOOK_URL: ${{ secrets.HEALTH_DISCORD_WEBHOOK_URL }}
+    HEALTH_SLACK_WEBHOOK_URL: ${{ secrets.HEALTH_SLACK_WEBHOOK_URL }}
 ```
 
 ## The board flow
@@ -77,12 +80,16 @@ required env vars present. Example GitHub Actions step:
 The "board" is the human-in-the-loop review step. The intended flow:
 
 1. **Report** — a scheduled `run` posts the scored summary and the critical/high issues
-   to the channel (Discord embeds, plus the console echo).
-2. **Discuss** — people read it in the channel and decide which findings are worth
+   to every configured channel (Discord embeds **and** Slack, plus the console echo).
+   Each channel is delivered independently; one failing never blocks the others.
+2. **Discuss** — people read it in the channel(s) and decide which findings are worth
    tracking. Nothing is filed automatically by this path.
 3. **`/health-issues`** (or `health-check issues`) — after discussion, file the agreed
    findings to GitHub. This is the deliberate board step: discuss first, then track.
 4. **GitHub** — issues are created/updated/reopened, deduped by fingerprint.
+
+Healing outcomes (including PR links) are likewise broadcast back to every channel, so
+the Discord and Slack boards stay in sync with what was resolved and which PRs opened.
 
 For unattended setups you can collapse this with `run --file-issues`, which files
 issues in the same run without the discuss step.
@@ -145,6 +152,54 @@ Healing is **off and approval-required by default**. The flow:
 
 Start conservative: `dryRun: true`, a narrow `allowedFixTypes` (e.g. `["retrigger"]`),
 and a low `maxPerRun`. Widen only once you trust the gates.
+
+## The healer loop (GitHub-issue-driven)
+
+The `heal-issue` command closes the loop between filed GitHub issues and their fixes. It
+reads the **open** health-check issues, classifies how each would be remediated, and —
+once approved — drives them to resolution, announcing every outcome to all channels.
+
+End-to-end flow:
+
+1. **Run → report → channels** — a scheduled `run` scores the system and broadcasts the
+   report to every configured channel (Discord + Slack + console).
+2. **Approve → create issue** — agreed findings are filed to GitHub (`issues` or
+   `run --file-issues`), deduped by fingerprint.
+3. **`heal-issue`** — works the open issues. Each issue is routed by its collector's
+   `fix.type` down one of two paths:
+   - **OPS** (`sql` / `shell` / `http` / `retrigger`) — the engine executes the fix,
+     verifies the result, **closes the issue**, and broadcasts **`✅ Resolved #N`** to all
+     channels.
+   - **CODE** (`fix.type: code`) — the healing-agent writes the code fix, then
+     `shipCodeFix()` opens a pull request: it branches off `healing.pr.baseBranch`
+     (default `main`) with prefix `healing.pr.branchPrefix` (default `health-fix/`), sets
+     the PR body to include `Fixes #N`, comments the PR link on the issue, and (when
+     `healing.pr.announce` is true) broadcasts **`🔀 PR opened #N <url>`** to all channels.
+     **Merging the PR auto-closes the issue** via the `Fixes #N` reference.
+   - **Manual** — issues with no executable/code fix are listed as manual; the engine
+     does not act on them.
+
+PR creation requires the **`gh` CLI** to be installed and authenticated.
+
+### `heal-issue` flags
+
+| Flag | Effect |
+|------|--------|
+| `--list` | List the open health-check issues and how each would be remediated (ops fix / code fix → PR / manual). Nothing executes. |
+| `--approve all` | Approve **every** OPS fix (by issue number). |
+| `--approve <#,#>` | Approve specific OPS fixes by **issue number** (comma-separated). |
+| `--issue <#,#>` | Restrict the operation to specific issue numbers. |
+
+```bash
+npx health-check heal-issue --list
+npx health-check heal-issue --approve all
+npx health-check heal-issue --approve 142,145
+npx health-check heal-issue --issue 142
+```
+
+The same gates as `heal` apply to OPS fixes: `healing.enabled` + the fix type in
+`allowedFixTypes` + approval (unless `requireApproval: false`) + under `maxPerRun`, with
+`dryRun` logging instead of executing.
 
 ## Where state lives
 

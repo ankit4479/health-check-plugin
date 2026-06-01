@@ -107,10 +107,19 @@ export interface ShellCollector extends BaseCollector {
 
 export type CollectorConfig = PostgresCollector | HttpCollector | ShellCollector;
 
-// ── Delivery channel ─────────────────────────────────────────────────────────
+// ── Delivery channels ────────────────────────────────────────────────────────
+// Multiple channels can run at once (e.g. Discord AND Slack). Every report and
+// every healing outcome (including PR links) is broadcast to all of them.
 
 export interface DiscordChannel {
   type: "discord";
+  /** Env var holding a Discord incoming-webhook URL. */
+  webhookEnv: string;
+}
+
+export interface SlackChannel {
+  type: "slack";
+  /** Env var holding a Slack incoming-webhook URL. */
   webhookEnv: string;
 }
 
@@ -118,7 +127,7 @@ export interface ConsoleChannel {
   type: "console";
 }
 
-export type ChannelConfig = DiscordChannel | ConsoleChannel;
+export type ChannelConfig = DiscordChannel | SlackChannel | ConsoleChannel;
 
 // ── GitHub ───────────────────────────────────────────────────────────────────
 
@@ -142,8 +151,20 @@ export interface HealingConfig {
   maxPerRun?: number;
   /** Fix types the healer is permitted to execute automatically. */
   allowedFixTypes?: FixType[];
-  /** Glob/path allowlist for shell/sql fixes (defense in depth). */
+  /** Log what would run without executing. */
   dryRun?: boolean;
+  /**
+   * Pull-request behavior for code fixes. The agent writes the code change; the
+   * engine commits it to a branch and opens a PR linked to the GitHub issue.
+   */
+  pr?: {
+    /** Branch the PR targets (default "main"). */
+    baseBranch?: string;
+    /** Prefix for auto-created fix branches (default "health-fix/"). */
+    branchPrefix?: string;
+    /** If true, after a code fix, post the PR link to all channels (default true). */
+    announce?: boolean;
+  };
 }
 
 // ── Top-level config ─────────────────────────────────────────────────────────
@@ -157,7 +178,8 @@ export interface HealthCheckConfig {
   scoreBands: { healthy: number; warning: number; degraded: number };
   dataSources: Record<string, DataSourceConfig>;
   collectors: CollectorConfig[];
-  channel: ChannelConfig;
+  /** One or more delivery channels — reports + healing outcomes go to all of them. */
+  channels: ChannelConfig[];
   github: GitHubConfig;
   healing: HealingConfig;
   /** Where run state (reports, fingerprint history, solutions log) is stored. */
@@ -230,6 +252,17 @@ export function validateConfig(raw: unknown, path = "<inline>"): HealthCheckConf
     throw new ConfigError(`Config: "collectors" must be a non-empty array.`);
   }
 
+  // Normalize channels: prefer `channels` array; accept legacy singular `channel`;
+  // default to console. Multiple channels (e.g. Discord + Slack) run together.
+  let channels: ChannelConfig[];
+  if (Array.isArray(c.channels) && c.channels.length > 0) {
+    channels = c.channels as ChannelConfig[];
+  } else if (c.channel) {
+    channels = [c.channel as ChannelConfig];
+  } else {
+    channels = [{ type: "console" }];
+  }
+
   const config: HealthCheckConfig = {
     project: c.project as string,
     scope: typeof c.scope === "string" ? c.scope : undefined,
@@ -238,7 +271,7 @@ export function validateConfig(raw: unknown, path = "<inline>"): HealthCheckConf
     scoreBands: { ...DEFAULT_SCORE_BANDS, ...(c.scoreBands as object) },
     dataSources: (c.dataSources as Record<string, DataSourceConfig>) ?? {},
     collectors: c.collectors as CollectorConfig[],
-    channel: (c.channel as ChannelConfig) ?? { type: "console" },
+    channels,
     github: (c.github as GitHubConfig) ?? { enabled: false, repoEnv: "HEALTH_GITHUB_REPO" },
     healing: (c.healing as HealingConfig) ?? { enabled: false, requireApproval: true },
     stateDir: typeof c.stateDir === "string" ? c.stateDir : ".health-check",

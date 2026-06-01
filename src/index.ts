@@ -24,9 +24,17 @@ export { computeScore, classifyBand } from "./scoring.js";
 export { buildFingerprint, parseFingerprint } from "./fingerprint.js";
 export { StateStore } from "./state.js";
 export { updateFingerprintHistory, compoundFix, recurrenceOf } from "./memory.js";
-export { syncIssuesToGitHub } from "./github.js";
+export {
+  syncIssuesToGitHub,
+  fetchOpenHealthIssues,
+  closeHealthIssue,
+  commentOnIssue,
+  openPullRequest,
+} from "./github.js";
 export { generateHealingPlan } from "./healing/plan.js";
 export { executeHealing } from "./healing/execute.js";
-export { deliver } from "./delivery/index.js";
+export { matchOpenIssues, healOpenIssues, shipCodeFix } from "./healing/issue-heal.js";
+export type { CodeFixDetails, MatchedIssue, HealIssueResult } from "./healing/issue-heal.js";
+export { deliver, deliverOutcome } from "./delivery/index.js";
 
 export type * from "./types.js";
