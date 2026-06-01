@@ -36,5 +36,9 @@ export { executeHealing } from "./healing/execute.js";
 export { matchOpenIssues, healOpenIssues, shipCodeFix } from "./healing/issue-heal.js";
 export type { CodeFixDetails, MatchedIssue, HealIssueResult } from "./healing/issue-heal.js";
 export { deliver, deliverOutcome } from "./delivery/index.js";
+export { generateSchedule, buildLocalCron, buildUtcCron, githubActionsWorkflow } from "./schedule.js";
+export type { ScheduleSpec } from "./schedule.js";
+export { startBot } from "./bot/index.js";
+export { handleAction, reportButtons } from "./bot/actions.js";
 
 export type * from "./types.js";

@@ -23,6 +23,7 @@ import { syncIssuesToGitHub } from "./github.js";
 import { generateHealingPlan } from "./healing/plan.js";
 import { executeHealing } from "./healing/execute.js";
 import { matchOpenIssues, healOpenIssues } from "./healing/issue-heal.js";
+import { generateSchedule, type ScheduleSpec } from "./schedule.js";
 import type { CollectorContext } from "./collectors/index.js";
 
 const args = process.argv.slice(2);
@@ -52,6 +53,10 @@ async function main(): Promise<void> {
       return cmdHealIssue();
     case "verify":
       return cmdVerify();
+    case "schedule":
+      return cmdSchedule();
+    case "bot":
+      return cmdBot();
     case "init":
       return cmdInit();
     case "help":
@@ -218,6 +223,57 @@ async function cmdVerify(): Promise<void> {
   }
 }
 
+async function cmdBot(): Promise<void> {
+  const config = loadConfig(flag("config"));
+  const { startBot } = await import("./bot/index.js");
+  const runtime = await startBot(config);
+  console.log("[bot] running. Press Ctrl-C to stop.");
+
+  // Optionally post an immediate report on startup.
+  if (has("run-now")) {
+    const { report } = await runCycle(config, { quiet: true });
+    for (const h of runtime.handles) await h.postReport(report);
+  }
+
+  // Keep the process alive until interrupted.
+  const shutdown = async () => {
+    console.log("\n[bot] shutting down…");
+    await runtime.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  await new Promise(() => {}); // run forever
+}
+
+function cmdSchedule(): void {
+  const at = flag("at");
+  const cron = flag("cron");
+  if (!at && !cron) {
+    console.error('Provide a time: `schedule --at "09:00" [--tz "Asia/Kolkata"]` or `--cron "0 9 * * *"`.');
+    process.exitCode = 1;
+    return;
+  }
+  const spec: ScheduleSpec = {
+    at: at ?? "09:00",
+    tz: flag("tz"),
+    cron,
+    command: flag("cmd"),
+  };
+  const mode = (flag("mode") as "cron" | "github-actions" | "both") ?? "both";
+  const result = generateSchedule(spec, mode);
+
+  if (result.cronLine) {
+    console.log("\nAdd this line to your crontab (`crontab -e`):\n");
+    console.log("  " + result.cronLine + "\n");
+  }
+  if (result.workflowPath) {
+    console.log(`Wrote GitHub Actions workflow: ${result.workflowPath}`);
+    console.log("Commit it, and add the referenced secrets in repo Settings → Secrets.\n");
+  }
+  console.log("Once scheduled, the health check runs autonomously — no manual kicks needed.");
+}
+
 function cmdInit(): void {
   const target = resolve(process.cwd(), "health-check.config.json");
   if (existsSync(target)) {
@@ -263,6 +319,10 @@ Commands:
              Ops fixes run, verify, close the issue, and announce to all channels.
              Code fixes are flagged for the agent to write + ship as a PR.
   verify     Show recurring vs. resolved issues across runs
+  schedule   Set up autonomous runs (cron line + GitHub Actions workflow)
+             --at "09:00" [--tz "Asia/Kolkata"] | --cron "0 9 * * *"
+             --mode cron|github-actions|both    --cmd "<command>"
+  bot        Start the 24/7 interactive bot (Discord/Slack buttons) — needs hosting
   init       Scaffold a starter health-check.config.json
 
 Global:

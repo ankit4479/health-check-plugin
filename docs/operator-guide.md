@@ -24,6 +24,8 @@ npx tsx src/cli.ts <command> [flags]    # from a checkout (dev)
 | `heal` | Execute approved fixes from the plan, inside the safety envelope. |
 | `heal-issue` | Drive the GitHub-issue-driven healer loop: list open health-check issues and remediate them (ops fix, code fix → PR, or manual). See [The healer loop](#the-healer-loop-github-issue-driven). |
 | `verify` | Show recurring vs. resolved issues across runs. |
+| `schedule` | Generate a crontab line and/or a `.github/workflows/health-check.yml` GitHub Actions workflow so runs happen autonomously. See [Scheduling & autonomy](#scheduling--autonomy). |
+| `bot` | Start the interactive 24/7 bot: a persistent process that posts reports **with buttons** and runs the approve→file→fix loop from Discord/Slack clicks. See [Interactive bot](#interactive-bot). |
 | `init` | Scaffold a starter `health-check.config.json`. |
 
 ### `run` flags
@@ -51,18 +53,51 @@ npx health-check heal --approve 0,2
 > `run` sets a non-zero exit code (`2`) when any **critical** issue exists — useful for
 > gating CI.
 
-## Scheduling
+## Scheduling & autonomy
 
-The engine is a plain CLI, so any scheduler can drive it. A typical hourly cron:
+There are two ways to make the health check run on its own. They are complementary —
+pick one, or run both.
 
-```cron
-# Run a health check every hour, file high+ issues to GitHub
-0 * * * * cd /path/to/project && npx health-check run --file-issues >> /var/log/health-check.log 2>&1
+| Autonomy model | What it is | Hosting | Interactive? |
+|----------------|-----------|---------|--------------|
+| **Scheduled CLI + webhooks** | A scheduler (cron / GitHub Actions / Trigger.dev) fires `health-check run` on a clock; reports post to the one-way **webhook channels** (`channels[]`). | Cron/VPS or GitHub Actions runner; webhooks need no hosting. | No — webhooks are notifications only. |
+| **Interactive 24/7 bot** | A persistent `health-check bot` process posts reports **with buttons** and runs the approve→file→fix loop from clicks. | A long-lived process (24/7 hosting). | Yes — Discord/Slack buttons. |
+
+### The `schedule` command
+
+`schedule` writes the scheduling artifacts for you instead of hand-rolling cron syntax:
+
+```bash
+health-check schedule --at "09:00" --tz "Asia/Kolkata" --mode both
 ```
 
-The same `run` command works unchanged inside **Trigger.dev**, **GitHub Actions**, or
-any other scheduler — it just needs the working directory, the config, and the
-required env vars present. Example GitHub Actions step:
+| Flag | Effect |
+|------|--------|
+| `--at "HH:MM"` | Local time of day to run. |
+| `--tz "<IANA>"` | IANA timezone the `--at` time is interpreted in (e.g. `Asia/Kolkata`). |
+| `--cron "<expr>"` | Provide a raw cron expression instead of `--at`. |
+| `--mode cron\|github-actions\|both` | Which artifact(s) to emit. |
+| `--cmd "<command>"` | Command the schedule runs. Defaults to `npx health-check run --file-issues`. |
+
+It generates:
+
+- **(a) a crontab line** for a local machine or VPS, e.g.:
+
+  ```cron
+  0 9 * * * cd /path/to/project && npx health-check run --file-issues >> /var/log/health-check.log 2>&1
+  ```
+
+- **(b) a `.github/workflows/health-check.yml`** GitHub Actions cron workflow. The
+  local `--at` time + `--tz` are **auto-converted to UTC** for the workflow's `cron:`
+  expression (GitHub Actions cron is always UTC), so `09:00 Asia/Kolkata` becomes
+  `30 3 * * *`.
+
+Once scheduled, runs happen **autonomously**. Reports are delivered to whatever
+`channels[]` you've configured (the one-way webhook notifications below).
+
+The underlying `run` command also works unchanged inside **Trigger.dev** or any other
+scheduler — it just needs the working directory, the config, and the required env vars
+present. Example GitHub Actions step (what the generated workflow runs):
 
 ```yaml
 - name: Health check
@@ -74,6 +109,42 @@ required env vars present. Example GitHub Actions step:
     HEALTH_DISCORD_WEBHOOK_URL: ${{ secrets.HEALTH_DISCORD_WEBHOOK_URL }}
     HEALTH_SLACK_WEBHOOK_URL: ${{ secrets.HEALTH_SLACK_WEBHOOK_URL }}
 ```
+
+### Interactive bot
+
+The **webhook channels** (`channels[]`) are one-way notifications: they post a report
+and stop. The **bot** is a separate, persistent, interactive process — it posts reports
+**with buttons** and runs the approve→file→fix loop directly from clicks. Start it with:
+
+```bash
+health-check bot            # connect and serve reports + button clicks
+health-check bot --run-now  # also run a check immediately on startup
+```
+
+With `bot.runAt` set (and `bot.tz`), the bot also self-runs the check daily at that
+local time. Configure it under the [`bot`](./configuration.md#bot) config block.
+
+**Buttons in each report, and the two approval gates:**
+
+1. **File GitHub issues** — **approval gate #1**. Clicking it files the report's issues
+   to GitHub (same as `health-check issues`).
+2. **Fix #N** (one per issue) — **approval gate #2**. Clicking it runs that issue's fix.
+   Only **ops fixes** (`sql`/`shell`/`http`/`retrigger`) are executed from a click; for
+   **code** fixes the bot replies telling you to run the healing-agent instead.
+
+**Tokens, not webhooks.** The bot needs a **bot token** per platform (never a webhook
+URL):
+
+- **Discord** — a **bot token** (`HEALTH_DISCORD_BOT_TOKEN`) + a channel id, with the
+  bot invited to the server with **Send Messages** and **Read Message History**.
+- **Slack** — **Socket Mode** (no public URL): a **bot token** `xoxb-…`
+  (`HEALTH_SLACK_BOT_TOKEN`, `chat:write`) **and** an app-level token `xapp-…`
+  (`HEALTH_SLACK_APP_TOKEN`, `connections:write`).
+
+The bot requires the optional deps `discord.js` / `@slack/bolt` (installed via
+`npm install`) and, because it must stay online to receive clicks, **24/7 hosting**. See
+[`docs/deployment.md`](./deployment.md) for Docker / systemd / Railway / Render / Fly
+options.
 
 ## The board flow
 

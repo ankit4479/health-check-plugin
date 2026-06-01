@@ -36,6 +36,7 @@ Defined in `src/config.ts` (`findConfigPath`, `loadConfig`, `validateConfig`).
 | `channels` | `array` | No | `[{ "type": "console" }]` | Where reports and healing outcomes are delivered. One or more channels — every configured channel receives every broadcast. The legacy singular `channel` (object) is still accepted and auto-wrapped into a 1-element array. |
 | `github` | `object` | No | `{ enabled: false, repoEnv: "HEALTH_GITHUB_REPO" }` | GitHub issue integration. |
 | `healing` | `object` | No | `{ enabled: false, requireApproval: true }` | Auto-heal behavior and safety envelope. |
+| `bot` | `object` | No | `{ enabled: false }` | The interactive 24/7 bot (`health-check bot`) that posts reports **with buttons** and runs the approve→file→fix loop from Discord/Slack clicks. Distinct from `channels` (one-way webhook notifications). See [`bot`](#bot). |
 | `stateDir` | `string` | No | `.health-check` | Directory for reports, fingerprint history, and the solutions log. |
 
 ### `severityWeights`
@@ -342,6 +343,78 @@ opens a pull request whose body contains `Fixes #N`. Requires the `gh` CLI.
 
 ---
 
+## `bot`
+
+The **interactive 24/7 bot** — a separate, persistent process started with
+`health-check bot` (see the [Operator Guide](./operator-guide.md#scheduling--autonomy)).
+Unlike `channels`, it does more than notify: it posts each report **with buttons** and
+drives the approve→file→fix loop directly from clicks in Discord/Slack.
+
+> **Webhook channels vs. the bot.** The `channels[]` entries (`discord`/`slack`
+> `webhookEnv`) are **one-way notifications** — they post a report and stop. They work
+> today, need no hosting, and use an incoming **webhook URL**. The `bot` is a
+> separate, **persistent, interactive** process: it needs a **bot token** (not a
+> webhook) and **24/7 hosting** to stay online and respond to button clicks. You can run
+> both at once (webhook notifications now, bot for interactivity).
+
+> **Optional deps + hosting.** The bot requires the optional dependencies
+> `discord.js` / `@slack/bolt` (pulled in by `npm install`). Because it must stay
+> running to receive clicks, host it as a long-lived process — see
+> [`docs/deployment.md`](./deployment.md) for Docker / systemd / Railway / Render / Fly
+> options.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `enabled` | `boolean` | No | `false` | Master switch for the bot process. When `false`, `health-check bot` does nothing. |
+| `runAt` | `string` | No | _(unset)_ | Optional `"HH:MM"` local time at which the bot **self-runs** the health check daily. Omit to only post when triggered manually (e.g. `bot --run-now`) or by an external scheduler. |
+| `tz` | `string` | No | _(unset)_ | IANA timezone (e.g. `"Asia/Kolkata"`) that `runAt` is interpreted in. |
+| `discord` | `object` | No | — | Discord bot connection. See below. |
+| `slack` | `object` | No | — | Slack bot connection (Socket Mode). See below. |
+
+### `bot.discord`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `botTokenEnv` | `string` | **Yes** | Env var holding the **Discord bot token** (`HEALTH_DISCORD_BOT_TOKEN`). This is a bot token, **not** a webhook URL. The bot must be invited to the server with **Send Messages** and **Read Message History** permissions. |
+| `channelId` | `string` | **Yes** | The Discord channel id the bot posts reports to and listens for button clicks in. |
+
+### `bot.slack`
+
+Uses **Socket Mode**, so no public URL or inbound webhook is required.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `botTokenEnv` | `string` | **Yes** | Env var holding the Slack **bot token** (`xoxb-…`, `HEALTH_SLACK_BOT_TOKEN`). Needs the `chat:write` scope. |
+| `appTokenEnv` | `string` | **Yes** | Env var holding the Slack **app-level token** (`xapp-…`, `HEALTH_SLACK_APP_TOKEN`) with `connections:write`, used to open the Socket Mode connection. |
+| `channelId` | `string` | **Yes** | The Slack channel id the bot posts to and listens in. |
+
+**Buttons posted with each report:**
+
+- **File GitHub issues** — approval gate #1. Clicking it files the report's issues to
+  GitHub (same path as `health-check issues`).
+- **Fix #N** (one per issue) — approval gate #2. Clicking it runs the fix for that issue.
+  Only **ops fixes** (`sql`/`shell`/`http`/`retrigger`) are executed; for **code** fixes
+  the bot replies telling the user to run the healing-agent instead.
+
+```json
+"bot": {
+  "enabled": false,
+  "runAt": "09:00",
+  "tz": "Asia/Kolkata",
+  "discord": {
+    "botTokenEnv": "HEALTH_DISCORD_BOT_TOKEN",
+    "channelId": "..."
+  },
+  "slack": {
+    "botTokenEnv": "HEALTH_SLACK_BOT_TOKEN",
+    "appTokenEnv": "HEALTH_SLACK_APP_TOKEN",
+    "channelId": "..."
+  }
+}
+```
+
+---
+
 ## Complete annotated example
 
 ```jsonc
@@ -436,6 +509,24 @@ opens a pull request whose body contains `Fixes #N`. Requires the `gh` CLI.
       "baseBranch": "main",
       "branchPrefix": "health-fix/",
       "announce": true
+    }
+  },
+
+  // Interactive 24/7 bot (separate, persistent process; needs bot tokens +
+  // hosting). Distinct from the one-way webhook channels above.
+  "bot": {
+    "enabled": false,
+    // Optional: bot self-runs the check daily at this local time.
+    "runAt": "09:00",
+    "tz": "Asia/Kolkata",
+    "discord": {
+      "botTokenEnv": "HEALTH_DISCORD_BOT_TOKEN",
+      "channelId": "..."
+    },
+    "slack": {
+      "botTokenEnv": "HEALTH_SLACK_BOT_TOKEN",
+      "appTokenEnv": "HEALTH_SLACK_APP_TOKEN",
+      "channelId": "..."
     }
   },
 

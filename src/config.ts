@@ -167,6 +167,37 @@ export interface HealingConfig {
   };
 }
 
+// ── Interactive bot (optional 24/7 process) ──────────────────────────────────
+// A webhook channel is one-way (notifications only). The bot is a persistent
+// process that ALSO listens — posting reports with buttons and running the
+// approve → file → fix → PR loop from inside the channel. It needs hosting.
+
+export interface DiscordBotConfig {
+  /** Env var holding the Discord bot token. */
+  botTokenEnv: string;
+  /** Channel id the bot posts to and listens in. */
+  channelId: string;
+}
+
+export interface SlackBotConfig {
+  /** Env var holding the Slack bot token (xoxb-…). */
+  botTokenEnv: string;
+  /** Env var holding the Slack app-level token (xapp-…) for Socket Mode. */
+  appTokenEnv: string;
+  /** Channel id the bot posts to. */
+  channelId: string;
+}
+
+export interface BotConfig {
+  enabled: boolean;
+  discord?: DiscordBotConfig;
+  slack?: SlackBotConfig;
+  /** Daily local time the bot itself runs the check (e.g. "09:00"). Omit to disable self-scheduling. */
+  runAt?: string;
+  /** IANA timezone for runAt. */
+  tz?: string;
+}
+
 // ── Top-level config ─────────────────────────────────────────────────────────
 
 export interface HealthCheckConfig {
@@ -182,6 +213,8 @@ export interface HealthCheckConfig {
   channels: ChannelConfig[];
   github: GitHubConfig;
   healing: HealingConfig;
+  /** Optional 24/7 interactive bot (in-channel buttons + autonomous runs). */
+  bot?: BotConfig;
   /** Where run state (reports, fingerprint history, solutions log) is stored. */
   stateDir?: string;
 }
@@ -274,6 +307,7 @@ export function validateConfig(raw: unknown, path = "<inline>"): HealthCheckConf
     channels,
     github: (c.github as GitHubConfig) ?? { enabled: false, repoEnv: "HEALTH_GITHUB_REPO" },
     healing: (c.healing as HealingConfig) ?? { enabled: false, requireApproval: true },
+    bot: c.bot as BotConfig | undefined,
     stateDir: typeof c.stateDir === "string" ? c.stateDir : ".health-check",
   };
 

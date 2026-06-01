@@ -39,7 +39,8 @@
     "pg": "^8.13.0"
   },
   "optionalDependencies": {
-    "undici": "^6.0.0"
+    "discord.js": "^14.16.0",
+    "@slack/bolt": "^4.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

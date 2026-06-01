@@ -97,5 +97,20 @@
     }
   },
 
+  "bot": {
+    "enabled": false,
+    "runAt": "09:00",
+    "tz": "Asia/Kolkata",
+    "discord": {
+      "botTokenEnv": "HEALTH_DISCORD_BOT_TOKEN",
+      "channelId": "<discord-channel-id>"
+    },
+    "slack": {
+      "botTokenEnv": "HEALTH_SLACK_BOT_TOKEN",
+      "appTokenEnv": "HEALTH_SLACK_APP_TOKEN",
+      "channelId": "<slack-channel-id>"
+    }
+  },
+
   "stateDir": ".health-check"
 }
